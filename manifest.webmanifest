@@ -1,0 +1,13 @@
+{
+  "name": "Atsar",
+  "short_name": "Atsar",
+  "description": "Tracker ibadah dan murojaah pribadi yang editable dan GitHub-ready.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f4ef",
+  "theme_color": "#195d63",
+  "icons": [
+    {"src":"assets/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}

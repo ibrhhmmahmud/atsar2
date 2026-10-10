@@ -1,0 +1,342 @@
+(function(){
+  const $=(s,e=document)=>e.querySelector(s);
+  const $$=(s,e=document)=>Array.from(e.querySelectorAll(s));
+  const view=$('#view'),toast=$('#toast'),modalRoot=$('#modalRoot'),importFile=$('#importFile'),installBtn=$('#installBtn');
+  const PAGE=document.body.dataset.page||'home';
+  const state={ibadahTab:'shalat',statsRange:30,selectedDate:keyOf(new Date()),settings:null,backupPayload:null,calendarCursor:new Date(),murojaahScope:'surah',murojaahDraft:null,murojaahEditId:null,murojaahHistoryFilter:'all',murojaahHistoryQuery:'',murojaahHistoryLimit:15,murojaahShowAllDue:false};
+
+  const DOAS=[
+    {title:'Sebelum makan',arab:'بِسْمِ اللّٰهِ',latin:'Bismillāh.',arti:'Dengan nama Allah.'},
+    {title:'Sesudah makan',arab:'الْحَمْدُ لِلّٰهِ الَّذِي أَطْعَمَنِي هٰذَا وَرَزَقَنِيهِ مِنْ غَيْرِ حَوْلٍ مِنِّي وَلَا قُوَّةٍ',latin:'Alhamdulillāhilladzī ath‘amanī hādzā wa razaqanīhi min ghairi haulin minnī wa lā quwwah.',arti:'Segala puji bagi Allah yang telah memberi makanan ini dan rezeki kepadaku tanpa daya dan kekuatan dariku.'},
+    {title:'Masuk rumah',arab:'بِسْمِ اللّٰهِ وَلَجْنَا وَبِسْمِ اللّٰهِ خَرَجْنَا وَعَلَى اللّٰهِ رَبِّنَا تَوَكَّلْنَا',latin:'Bismillāhi walajnā, wa bismillāhi kharajnā, wa ‘alallāhi rabbinā tawakkalnā.',arti:'Dengan nama Allah kami masuk, dengan nama Allah kami keluar, dan kepada Allah Tuhan kami, kami bertawakal.'},
+    {title:'Keluar rumah',arab:'بِسْمِ اللّٰهِ تَوَكَّلْتُ عَلَى اللّٰهِ لَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللّٰهِ',latin:'Bismillāhi tawakkaltu ‘alallāh, lā haula wa lā quwwata illā billāh.',arti:'Dengan nama Allah, aku bertawakal kepada Allah. Tiada daya dan kekuatan kecuali dengan pertolongan Allah.'},
+    {title:'Sebelum tidur',arab:'بِاسْمِكَ اللّٰهُمَّ أَحْيَا وَبِاسْمِكَ أَمُوتُ',latin:'Bismikallāhumma ahyā wa bismika amūt.',arti:'Dengan nama-Mu ya Allah aku hidup dan dengan nama-Mu aku mati.'},
+    {title:'Bangun tidur',arab:'الْحَمْدُ لِلّٰهِ الَّذِي أَحْيَانَا بَعْدَ مَا أَمَاتَنَا وَإِلَيْهِ النُّشُورُ',latin:'Alhamdulillāhilladzī ahyānā ba‘da mā amātanā wa ilaihin nusyūr.',arti:'Segala puji bagi Allah yang menghidupkan kami setelah mematikan kami, dan kepada-Nya kebangkitan.'}
+  ];
+
+  function keyOf(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
+  function fromKey(k){const [y,m,d]=k.split('-').map(Number);return new Date(y,m-1,d)}
+  function addDays(date,n){const d=new Date(date);d.setDate(d.getDate()+n);return d}
+  function fmt(date,opts){return new Intl.DateTimeFormat('id-ID',opts).format(date)}
+  function hijri(date){try{return new Intl.DateTimeFormat('id-ID-u-ca-islamic',{day:'numeric',month:'long',year:'numeric'}).format(date)}catch{return 'Tanggal Hijriah'}}
+  function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]))}
+  function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+  function sum(a,fn=x=>x){return a.reduce((t,x)=>t+Number(fn(x)||0),0)}
+  function pct(a,b){return b?Math.round(a/b*100):0}
+  function lastDates(n,end=new Date()){return Array.from({length:n},(_,i)=>addDays(end,-(n-1-i)))}
+  function todayKey(){return keyOf(new Date())}
+  function formObj(form){return Object.fromEntries(new FormData(form).entries())}
+  function showToast(m){toast.textContent=m;toast.classList.add('show');clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.classList.remove('show'),2200)}
+  function closeModal(){modalRoot.innerHTML=''}
+  function openModal(html){modalRoot.innerHTML=`<div class="modal-backdrop" data-action="close-modal"><div class="modal-card" data-stop>${html}</div></div>`}
+  function sectionHead(title,sub=''){return `<div class="section-title"><h2>${title}</h2>${sub?`<span class="muted small">${sub}</span>`:''}</div>`}
+  function emptyState(icon,title,desc,action=''){return `<div class="card empty-state"><div class="big-icon">${icon}</div><h3>${title}</h3><p class="muted">${desc}</p>${action}</div>`}
+  function backProfile(){return `<a class="back-btn link-btn" href="profil.html">← Kembali ke Profil</a>`}
+
+  function applyTheme(){
+    const s=state.settings;
+    document.documentElement.style.setProperty('--accent',s.accent||'#195d63');
+    document.body.classList.toggle('dark',!!s.darkMode);
+    document.title=`${pageTitle(PAGE)} · ${s.appName||'Atsar'}`;
+    $$('[data-brand]').forEach(el=>el.textContent=s.appName||'Atsar');
+    const meta=$('meta[name="theme-color"]');if(meta)meta.setAttribute('content',s.accent||'#195d63');
+  }
+  function pageTitle(p){return ({home:'Home',ibadah:'Ibadah',murojaah:'Murojaah',aktivitas:'Aktivitas',profil:'Profil',statistik:'Statistik',targets:'Target & Streak',kalender:'Kalender Ibadah',qadha:'Qadha Puasa',doa:'Kumpulan Doa',custom:'Ibadah Custom',personal:'Personalisasi',prayer:'Waktu Shalat',display:'Tampilan',backup:'Data & Backup'})[p]||'Atsar'}
+
+  async function dataset(){
+    const [days,murojaah,journal]=await Promise.all(['days','murojaah','journal'].map(AtsarDB.getAll));
+    const dayMap=Object.fromEntries(days.map(d=>[d.date,d]));
+    const murojaahByDate={};murojaah.forEach(x=>(murojaahByDate[x.date]||(murojaahByDate[x.date]=[])).push(x));
+    return {days,dayMap,murojaah,journal,murojaahByDate};
+  }
+  async function dayData(date=state.selectedDate){return AtsarDB.getDay(date)}
+  function murojaahSessionsFor(ds,date){return (ds.murojaahByDate[date]||[]).length}
+  function murojaahAyatFor(ds,date){return sum(ds.murojaahByDate[date]||[],x=>{if(x.scope==='juz'||x.juz)return 0;const a=Number(x.startAyah||0),b=Number(x.endAyah||0);return a&&b&&b>=a?b-a+1:0})}
+  function murojaahPagesFor(ds,date){return sum(ds.murojaahByDate[date]||[],x=>Number(x.pages||((x.startPage&&x.endPage)?x.endPage-x.startPage+1:0)))}
+  function prayerCount(day){return Object.values(day?.prayers||{}).filter(p=>p.done).length}
+  function rawatibCount(day){let n=0;Object.entries(day?.prayers||{}).forEach(([id,p])=>{const slots=state.settings.rawatib[id]||[];if(slots.includes('qab')&&p.qab)n++;if(slots.includes('bad')&&p.bad)n++});return n}
+  function hasDayActivity(day,ds,date){if(!day)return murojaahSessionsFor(ds,date)>0;return Object.values(day.prayers||{}).some(p=>p.done||p.qab||p.bad)||(day.sunnah?.dhuha||0)>0||(day.sunnah?.tahajud||0)>0||day.sunnah?.witir||day.fast?.active||(day.dzikir?.pagi||0)>0||(day.dzikir?.petang||0)>0||Object.values(day.custom||{}).some(Boolean)||murojaahSessionsFor(ds,date)>0}
+  function nextPrayer(){const now=new Date();for(const id of ['subuh','dzuhur','ashar','maghrib','isya']){const [h,m]=(state.settings.prayerTimes[id]||'00:00').split(':').map(Number);const t=new Date(now);t.setHours(h,m,0,0);if(t>now)return{id,label:state.settings.prayerLabels[id],time:state.settings.prayerTimes[id]}}return{id:'subuh',label:'Subuh',time:state.settings.prayerTimes.subuh,tomorrow:true}}
+
+  function dateStrip(ds){const today=todayKey();return `<div class="date-strip">${lastDates(7).map(d=>{const k=keyOf(d),active=hasDayActivity(ds.dayMap[k],ds,k);return `<button class="date-chip ${k===state.selectedDate?'selected':''} ${k===today?'today':''}" data-date="${k}"><strong>${d.getDate()}</strong><span>${fmt(d,{weekday:'short'}).replace('.','')}</span>${active?'<i class="dot"></i>':''}</button>`}).join('')}</div>`}
+
+  function prayerBlock(id,p){const label=state.settings.prayerLabels[id],slots=state.settings.rawatib[id]||[];return `<div class="prayer-block"><div class="prayer-head"><div><div class="prayer-name">${esc(label)}</div><div class="prayer-time">${esc(state.settings.prayerTimes[id])}</div></div><button class="check-circle ${p.done?'done':''}" data-action="toggle-prayer" data-prayer="${id}">${p.done?'✓':''}</button></div>${p.done?`<div class="mode-row">${[['sendiri','Sendiri'],['jamaah','Jamaah'],['masjid','Jamaah di Masjid']].map(([v,t])=>`<button class="pill ${p.mode===v?'active':''}" data-action="prayer-mode" data-prayer="${id}" data-mode="${v}">${t}</button>`).join('')}</div>`:''}${slots.map(slot=>`<div class="rawatib-row"><span>☆ ${slot==='qab'?'Qabliyah':'Ba’diyah'} ${esc(label)}${id==='ashar'&&slot==='qab'?'<small> ghairu muakkadah</small>':''}</span><button class="switch ${p[slot]?'on':''}" data-action="rawatib" data-prayer="${id}" data-slot="${slot}"></button></div>`).join('')}</div>`}
+
+  function targetChecks(day,ds,date){const t=state.settings.targets||{},rows=[];if(t.prayer5)rows.push(['Shalat 5 waktu',prayerCount(day)>=5]);if(t.dzikirPagi)rows.push(['Dzikir pagi',(day.dzikir?.pagi||0)>0]);if(t.dhuha)rows.push(['Dhuha',(day.sunnah?.dhuha||0)>0]);if(t.murojaah)rows.push([`Murojaah ≥ ${t.murojaahSessions||1} sesi`,murojaahSessionsFor(ds,date)>=(t.murojaahSessions||1)]);return rows}
+  function dayGoalMet(day,ds,date){const rows=targetChecks(day,ds,date);return rows.length?rows.every(x=>x[1]):hasDayActivity(day,ds,date)}
+  function streakFrom(ds,kind='target'){let n=0,d=new Date();for(let i=0;i<1500;i++){const k=keyOf(d),day=ds.dayMap[k]||AtsarDB.emptyDay();const ok=kind==='murojaah'?murojaahSessionsFor(ds,k)>0:dayGoalMet(day,ds,k);if(!ok)break;n++;d=addDays(d,-1)}return n}
+  function targetSummary(ds,date){const day=ds.dayMap[date]||AtsarDB.emptyDay(),rows=targetChecks(day,ds,date);if(!rows.length)return `<p class="muted small">Belum ada target aktif. Atur dari Profil → Target & Streak.</p>`;return `<div class="target-list">${rows.map(([n,ok])=>`<div><span class="status-dot ${ok?'ok':''}">${ok?'✓':'○'}</span><span>${n}</span></div>`).join('')}</div>`}
+
+  function qualityMeta(q){return {weak:['Lemah','😣',1],fair:['Cukup','😐',3],good:['Baik','🙂',7],fluent:['Lancar','✨',14]}[q]||['-','○',3]}
+  function murojaahTitle(x){if((x.scope==='juz'||x.juz)&&x.juz)return `Juz ${x.juz}`;return x.surah||'Murojaah'}
+  function murojaahDetail(x){if((x.scope==='juz'||x.juz)&&x.juz){const page=x.startPage?` · Hal. ${x.startPage}${x.endPage?`–${x.endPage}`:''}`:'';return `Juz ${x.juz}${page}`;}if(x.startAyah)return `Ayat ${x.startAyah}${x.endAyah?`–${x.endAyah}`:''}`;if(x.startPage)return `Hal. ${x.startPage}${x.endPage?`–${x.endPage}`:''}`;return 'Bagian tercatat'}
+  function dueMurojaah(ds){const today=todayKey(),latest={};ds.murojaah.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.createdAt||'').localeCompare(String(b.createdAt||''))).forEach(x=>{const k=(x.scope==='juz'||x.juz)?`juz|${x.juz}|${x.startPage||''}|${x.endPage||''}`:`surah|${x.surah||''}|${x.startAyah||''}|${x.endAyah||''}|${x.startPage||''}|${x.endPage||''}`;latest[k]=x});return Object.values(latest).filter(x=>x.nextReview&&x.nextReview<=today).sort((a,b)=>fromKey(a.nextReview)-fromKey(b.nextReview))}
+  function murojaahRow(x,compact=false){
+    const [label,emoji]=qualityMeta(x.quality);
+    return `<div class="history-row"><div class="history-icon">${emoji}</div><div class="grow"><b>${esc(murojaahTitle(x))}</b><small>${esc(murojaahDetail(x))} · ${label}</small>${x.nextReview?`<small>Ulang ${x.nextReview<=todayKey()?'hari ini':fmt(fromKey(x.nextReview),{day:'numeric',month:'short'})}</small>`:''}${x.note?`<small>${esc(x.note)}</small>`:''}</div>${!compact?`<button class="icon-btn danger-text" type="button" data-action="delete-murojaah" data-id="${Number(x.id)}" aria-label="Hapus catatan">×</button>`:''}</div>`;
+  }
+  function surahOptions(selected=''){
+    return `<option value="">Pilih surah</option>${window.ATSAR_SURAHS.map(s=>`<option value="${esc(s)}" ${s===selected?'selected':''}>${esc(s)}</option>`).join('')}`;
+  }
+  function juzOptions(selected=''){
+    return `<option value="">Pilih juz</option>${Array.from({length:30},(_,i)=>`<option value="${i+1}" ${String(i+1)===String(selected)?'selected':''}>Juz ${i+1}</option>`).join('')}`;
+  }
+  function murojaahLatestFirst(a,b){
+    return `${b.date||''} ${b.createdAt||''}`.localeCompare(`${a.date||''} ${a.createdAt||''}`);
+  }
+  function murojaahNextReview(date,quality){
+    return keyOf(addDays(fromKey(date),qualityMeta(quality)[2]));
+  }
+  function murojaahHistoryRow(x){
+    const [quality,emoji]=qualityMeta(x.quality);
+    return `<div class="m-record">
+      <div class="m-record-leading" aria-hidden="true">${emoji}</div>
+      <div class="m-record-main">
+        <div class="m-record-head"><strong>${esc(murojaahTitle(x))}</strong><span class="m-record-date">${esc(fmt(fromKey(x.date),{day:'numeric',month:'short',year:'numeric'}))}</span></div>
+        <small>${esc(murojaahDetail(x))} · ${quality}</small>
+        ${x.note?`<p class="m-record-note">${esc(x.note)}</p>`:''}
+        ${x.nextReview?`<small class="m-review-status">↻ Jadwal ulang: ${esc(fmt(fromKey(x.nextReview),{day:'numeric',month:'short',year:'numeric'}))}</small>`:''}
+        <div class="m-record-actions">
+          <button type="button" class="m-inline-action" data-action="edit-murojaah" data-id="${Number(x.id)}">✎ Edit</button>
+          <button type="button" class="m-inline-action danger-text" data-action="delete-murojaah" data-id="${Number(x.id)}">Hapus</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  function murojaahHistory(ds){
+    const filter=state.murojaahHistoryFilter,query=state.murojaahHistoryQuery.trim().toLocaleLowerCase('id');
+    const records=ds.murojaah.filter(x=>{
+      const juz=x.scope==='juz'||!!x.juz;
+      if(filter==='juz'&&!juz)return false;
+      if(filter==='surah'&&juz)return false;
+      return !query||[murojaahTitle(x),murojaahDetail(x),x.note||'',x.date||''].join(' ').toLocaleLowerCase('id').includes(query);
+    }).sort(murojaahLatestFirst);
+    if(!records.length)return emptyState('⌕','Tidak ada catatan yang cocok','Coba ubah kata kunci atau filter pencarian.');
+    return `<div class="card m-record-list">${records.slice(0,state.murojaahHistoryLimit).map(murojaahHistoryRow).join('')}</div>${records.length>state.murojaahHistoryLimit?`<button type="button" class="ghost-btn full m-load-more" data-action="more-murojaah">Tampilkan lagi (${records.length-state.murojaahHistoryLimit} tersisa)</button>`:''}`;
+  }
+  function murojaahDraftValue(name,fallback=''){
+    return esc(state.murojaahDraft?.[name]??fallback);
+  }
+  function murojaahForm(){
+    const editing=state.murojaahEditId!==null;
+    const draft=state.murojaahDraft||{};
+    const scope=state.murojaahScope;
+    const quality=draft.quality||'fair';
+    const date=draft.date||todayKey();
+    const next=murojaahNextReview(date,quality);
+    return `<section class="card pad m-entry-card" id="catat-murojaah">
+      <div class="m-entry-head"><div><span class="eyebrow">${editing?'EDIT CATATAN':'CATAT MUROJAAH'}</span><h2>${editing?'Perbarui sesi hafalan':'Apa yang kamu ulang hari ini?'}</h2></div>${(editing||state.murojaahDraft)?`<button type="button" class="m-cancel-btn" data-action="cancel-murojaah">Batal</button>`:''}</div>
+      <div class="scope-switch" aria-label="Jenis hafalan"><button type="button" class="${scope==='surah'?'active':''}" data-action="scope" data-scope="surah" aria-pressed="${scope==='surah'}">Per Surah</button><button type="button" class="${scope==='juz'?'active':''}" data-action="scope" data-scope="juz" aria-pressed="${scope==='juz'}">Per Juz</button></div>
+      <form id="murojaahForm" class="form-grid">
+        <input type="hidden" name="scope" value="${scope}">
+        <label>Tanggal murojaah<input class="form-input" name="date" type="date" value="${esc(date)}" max="${todayKey()}" required></label>
+        ${scope==='surah'?`<label>Nama surah<select class="form-select" name="surah" required>${surahOptions(draft.surah||'')}</select></label><div class="two"><label>Dari ayat <small>(opsional)</small><input class="form-input" type="number" min="1" step="1" name="startAyah" placeholder="Mis. 1" value="${murojaahDraftValue('startAyah')}"></label><label>Sampai ayat <small>(opsional)</small><input class="form-input" type="number" min="1" step="1" name="endAyah" placeholder="Mis. 20" value="${murojaahDraftValue('endAyah')}"></label></div>`:
+         `<label>Juz Al-Qur'an<select class="form-select" name="juz" required>${juzOptions(draft.juz||'')}</select></label><p class="m-helper">Bisa mencatat satu juz penuh atau sebagian melalui rentang halaman.</p>`}
+        <div class="two"><label>Halaman awal <small>(opsional)</small><input class="form-input" type="number" min="1" max="604" step="1" name="startPage" placeholder="1–604" value="${murojaahDraftValue('startPage')}"></label><label>Halaman akhir <small>(opsional)</small><input class="form-input" type="number" min="1" max="604" step="1" name="endPage" placeholder="1–604" value="${murojaahDraftValue('endPage')}"></label></div>
+        <p class="m-helper">Jika mengisi ayat atau halaman, tulis angka awal dan akhir agar pencatatan akurat.</p>
+        <fieldset class="m-quality-field"><legend>Kualitas hafalan</legend><div class="quality-grid">${[['weak','😣','Lemah'],['fair','😐','Cukup'],['good','🙂','Baik'],['fluent','✨','Lancar']].map(([v,e,l])=>`<label class="quality-choice"><input type="radio" name="quality" value="${v}" ${v===quality?'checked':''}><span>${e}<b>${l}</b></span></label>`).join('')}</div></fieldset>
+        <div id="m-next-review" class="m-next-review" aria-live="polite"><span>↻ Jadwal pengulangan berikutnya</span><strong>${esc(fmt(fromKey(next),{day:'numeric',month:'long',year:'numeric'}))}</strong><small>Otomatis berdasarkan kualitas hafalan (1, 3, 7, atau 14 hari).</small></div>
+        <label>Catatan pribadi <small>(opsional)</small><textarea name="note" rows="3" maxlength="1000" placeholder="Contoh: ayat 5–8 perlu diulang perlahan">${murojaahDraftValue('note')}</textarea></label>
+        <button class="primary-btn m-submit-btn" type="submit">${editing?'Simpan perubahan':'＋ Simpan catatan murojaah'}</button>
+      </form>
+    </section>`;
+  }
+  function murojaahDueRow(x){
+    const [label,emoji]=qualityMeta(x.quality);
+    return `<div class="m-due-item"><span class="m-due-emoji">${emoji}</span><div><b>${esc(murojaahTitle(x))}</b><small>${esc(murojaahDetail(x))} · ${label}</small><small>Jadwal ${esc(fmt(fromKey(x.nextReview),{day:'numeric',month:'short'}))}</small></div><button type="button" class="m-repeat-btn" data-action="repeat-murojaah" data-id="${Number(x.id)}">Ulang</button></div>`;
+  }
+
+  function weeklyInsight(ds){const now=lastDates(7),prev=lastDates(7,addDays(new Date(),-7)),x=sum(now,d=>murojaahSessionsFor(ds,keyOf(d))),y=sum(prev,d=>murojaahSessionsFor(ds,keyOf(d)));if(x===0&&y===0)return 'Mulai catat aktivitasmu. Insight akan muncul setelah ada beberapa hari data.';if(y===0)return `Pekan ini kamu mencatat ${x} sesi murojaah. Atsar akan membantu melihat pola konsistensimu.`;const diff=Math.round((x-y)/Math.max(y,1)*100);return `Murojaah pekan ini ${x} sesi, ${diff>=0?'naik':'turun'} ${Math.abs(diff)}% dibanding pekan sebelumnya. Data ini untuk refleksi, bukan penilaian.`}
+
+  async function homePage(){const ds=await dataset(),day=await dayData(),np=nextPrayer(),ms=murojaahSessionsFor(ds,state.selectedDate),dhuha=day.sunnah?.dhuha||0;return `<section class="hero"><h1>Assalamu'alaikum, ${esc(state.settings.nickname)}</h1><div class="date-line">▣ ${fmt(new Date(),{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · ${hijri(new Date())}</div></section><section class="card next-prayer"><div class="row between gap-12"><div><div class="muted small">Waktu shalat berikutnya</div><div class="time">${esc(np.label)} ${esc(np.time)}</div><div class="muted small">${esc(state.settings.location)}</div></div><button class="refresh-orb" data-action="render">↻</button></div></section>${sectionHead('Ringkasan Ibadah','hari ini')}<div class="summary-scroll"><article class="summary-card teal"><span>Shalat</span><strong>${prayerCount(day)}/5</strong><small>tercatat</small></article><article class="summary-card purple"><span>Rawatib</span><strong>${rawatibCount(day)}</strong><small>amalan</small></article><article class="summary-card gold"><span>Dhuha</span><strong>${dhuha}</strong><small>rakaat</small></article><article class="summary-card blue"><span>Murojaah</span><strong>${ms}</strong><small>sesi</small></article></div><a class="m-home-shortcut" href="murojaah.html">＋ Catat murojaah hari ini <span>→</span></a>${sectionHead('Hari Ini')}${dateStrip(ds)}<div class="home-grid"><div class="card compact-card"><div class="mini-heading">Target hari ini</div>${targetSummary(ds,state.selectedDate)}</div><div class="card compact-card"><div class="mini-heading">Insight pekan ini</div><p class="insight-text">${weeklyInsight(ds)}</p><a class="text-action" href="aktivitas.html">Lihat ringkasan →</a></div></div>${sectionHead('Shalat')}<div class="card prayer-list">${Object.keys(state.settings.prayerTimes).map(id=>prayerBlock(id,day.prayers[id])).join('')}</div>`}
+
+  async function ibadahPage(){const ds=await dataset(),day=await dayData();return `<section class="page-head"><h1>Ibadah</h1><p>Catat shalat, sunnah, puasa, dzikir, dan kebiasaan ibadahmu.</p></section><div class="tabs five">${[['shalat','Shalat'],['sunnah','Sunnah'],['puasa','Puasa'],['dzikir','Dzikir'],['custom','Custom']].map(([id,l])=>`<button class="tab-btn ${state.ibadahTab===id?'active':''}" data-ibadah-tab="${id}">${l}</button>`).join('')}</div>${dateStrip(ds)}<p class="muted strip-note">Menampilkan <b>${state.selectedDate===todayKey()?'Hari Ini':fmt(fromKey(state.selectedDate),{day:'numeric',month:'long'})}</b></p>${state.ibadahTab==='shalat'?`<div class="card prayer-list">${Object.keys(state.settings.prayerTimes).map(id=>prayerBlock(id,day.prayers[id])).join('')}</div>`:state.ibadahTab==='sunnah'?sunnahUI(day):state.ibadahTab==='puasa'?puasaUI(day,ds):state.ibadahTab==='dzikir'?dzikirUI(day):customDailyUI(day)}`}
+  function sunnahUI(day){return `<div class="stack">${state.settings.sunnah.map(x=>`<div class="card sunnah-card"><div class="emoji-box">${x.icon}</div><div><h3>${x.name}</h3><p>${x.note}</p></div>${x.mode==='rakaat'?`<div class="counter"><button data-action="sunnah-dec" data-id="${x.id}">−</button><div><strong>${day.sunnah[x.id]||0}</strong><small>rakaat</small></div><button data-action="sunnah-inc" data-id="${x.id}">+</button></div>`:`<button class="switch ${day.sunnah[x.id]?'on':''}" data-action="sunnah-toggle" data-id="${x.id}"></button>`}</div>`).join('')}</div>`}
+  function puasaUI(day,ds){const doneQadha=ds.days.filter(d=>d.fast?.active&&d.fast.type==='Qadha').length,left=Math.max(0,Number(state.settings.qadhaInitial||0)-doneQadha);return `<div class="card pad"><div class="row between"><div><h2>Puasa hari ini</h2><p class="muted">${day.fast.active?esc(day.fast.type):'Belum dicatat'}</p></div><button class="switch ${day.fast.active?'on':''}" data-action="fast-toggle"></button></div><div class="fast-options">${state.settings.fastTypes.map(t=>`<button class="fast-chip ${day.fast.type===t&&day.fast.active?'active':''}" data-action="fast-type" data-fast="${esc(t)}">${esc(t)}</button>`).join('')}</div></div><div class="card pad qadha-mini"><div><span class="eyebrow">QADHA PUASA</span><h2>${left} hari tersisa</h2><p class="muted">Utang awal ${state.settings.qadhaInitial||0} hari · selesai ${doneQadha} hari</p></div><a class="ghost-btn link-btn" href="qadha.html">Atur</a></div>`}
+  function dzikirUI(day){const target=state.settings.dzikirTargets;return `<div class="stack">${['pagi','petang'].map(k=>{const v=day.dzikir[k]||0,t=target[k]||100;return `<div class="card pad"><div class="row between"><div><h2>Dzikir ${k}</h2><p class="muted">${v} / ${t}</p></div><div class="ring-mini" style="--p:${clamp(v/t*100,0,100)}">${pct(v,t)}%</div></div><div class="quick-add"><button data-action="dzikir-add" data-kind="${k}" data-num="1">+1</button><button data-action="dzikir-add" data-kind="${k}" data-num="10">+10</button><button data-action="dzikir-add" data-kind="${k}" data-num="33">+33</button><button data-action="dzikir-reset" data-kind="${k}">Reset</button></div></div>`}).join('')}</div>`}
+  function customDailyUI(day){const items=state.settings.customHabits||[];if(!items.length)return emptyState('＋','Belum ada ibadah custom','Tambahkan kebiasaan seperti Al-Kahfi Jumat, sedekah, shalawat, kajian, atau hafalan.',`<a class="primary-btn link-btn" href="ibadah-custom.html">Tambah ibadah custom</a>`);return `<div class="stack">${items.map(h=>{const v=day.custom?.[h.id]||0;return `<div class="card custom-card"><div><h3>${esc(h.name)}</h3><p>${esc(h.unit||'Checklist')}${h.target?` · target ${h.target}`:''}</p></div>${h.type==='check'?`<button class="check-circle ${v?'done':''}" data-action="custom-check" data-id="${h.id}">${v?'✓':''}</button>`:`<div class="counter"><button data-action="custom-dec" data-id="${h.id}">−</button><strong>${v}</strong><button data-action="custom-inc" data-id="${h.id}">+</button></div>`}</div>`}).join('')}<a class="ghost-btn link-btn full center-link" href="ibadah-custom.html">Kelola ibadah custom</a></div>`}
+
+  async function murojaahPage(){
+    const ds=await dataset();
+    const due=dueMurojaah(ds),today=todayKey(),sessions=murojaahSessionsFor(ds,today),ayat=murojaahAyatFor(ds,today),pages=murojaahPagesFor(ds,today);
+    const target=Math.max(1,Number(state.settings.murojaahDailyTarget||1));
+    const targetPercent=clamp(pct(sessions,target),0,100);
+    return `<section class="page-head m-page-head"><span class="eyebrow">JEJAK HAFALAN</span><h1>Pencatatan Murojaah</h1><p>Catat hafalan berdasarkan surah atau juz, evaluasi kualitasnya, lalu ulang kembali sesuai jadwal.</p></section>
+      <section class="card pad m-progress-card"><div class="row between gap-12"><div><span class="eyebrow">TARGET HARI INI</span><h2>${sessions} <span class="m-target-divider">/ ${target} sesi</span></h2><p class="muted small">${sessions>=target?'Alhamdulillah, target hari ini tercapai.':'Sedikit demi sedikit, tetap istiqamah.'}</p></div><div class="m-progress-circle" style="--progress:${targetPercent}%" aria-label="${targetPercent}% target tercapai">${targetPercent}%</div></div><div class="progress-track"><div class="progress-fill" style="width:${targetPercent}%"></div></div></section>
+      <div class="stat-grid three stats-top"><div class="stat-box"><strong>${sessions}</strong><span>sesi hari ini</span></div><div class="stat-box"><strong>${ayat}</strong><span>ayat hari ini</span></div><div class="stat-box"><strong>${pages}</strong><span>halaman hari ini</span></div></div>
+      ${due.length?`<section class="card pad m-due-card"><div class="row between gap-12"><div><span class="eyebrow">PENGULANGAN HAFALAN</span><h2>${due.length} bagian perlu diulang</h2></div><span class="streak-badge">🧠 ${streakFrom(ds,'murojaah')} hari</span></div><p class="muted small">Tekan Ulang untuk langsung mencatat sesi berikutnya.</p><div class="m-due-list">${(state.murojaahShowAllDue?due:due.slice(0,5)).map(murojaahDueRow).join('')}</div>${due.length>5?`<button type="button" class="ghost-btn full" data-action="toggle-due">${state.murojaahShowAllDue?'Tampilkan lebih sedikit':`Tampilkan semua ${due.length} bagian`}</button>`:''}</section>`:''}
+      ${murojaahForm()}
+      <section class="m-history-section" id="riwayat-murojaah"><div class="section-title"><h2>Riwayat Murojaah</h2><span class="muted small">${ds.murojaah.length} catatan tersimpan</span></div>
+        <div class="m-history-toolbar"><label class="m-search"><span aria-hidden="true">⌕</span><input type="search" id="m-history-search" placeholder="Cari surah, juz, catatan..." value="${esc(state.murojaahHistoryQuery)}" aria-label="Cari riwayat murojaah"></label><select class="form-select" id="m-history-filter" aria-label="Filter catatan"><option value="all" ${state.murojaahHistoryFilter==='all'?'selected':''}>Semua</option><option value="surah" ${state.murojaahHistoryFilter==='surah'?'selected':''}>Surah</option><option value="juz" ${state.murojaahHistoryFilter==='juz'?'selected':''}>Juz</option></select></div>
+        <div id="m-history-results">${ds.murojaah.length?murojaahHistory(ds):emptyState('🧠','Belum ada catatan murojaah','Gunakan formulir di atas untuk mencatat sesi pertama.')}</div>
+      </section>`;
+  }
+
+  function activityLevel(day,ds,k){if(!hasDayActivity(day,ds,k))return 0;let score=prayerCount(day)+(murojaahSessionsFor(ds,k)>0?2:0)+(day.fast?.active?1:0)+((day.sunnah?.dhuha||0)>0?1:0)+((day.dzikir?.pagi||0)>0?1:0);return score>=7?3:score>=4?2:1}
+  function monthlyDays(cursor=state.calendarCursor){const y=cursor.getFullYear(),m=cursor.getMonth(),first=new Date(y,m,1),last=new Date(y,m+1,0),lead=(first.getDay()+6)%7,cells=[];for(let i=0;i<lead;i++)cells.push(null);for(let d=1;d<=last.getDate();d++)cells.push(new Date(y,m,d));while(cells.length%7)cells.push(null);return cells}
+  function calendarUI(ds){const cells=monthlyDays(),title=fmt(state.calendarCursor,{month:'long',year:'numeric'});return `<div class="card pad"><div class="calendar-head"><button class="icon-btn" data-action="cal-prev">‹</button><b>${title}</b><button class="icon-btn" data-action="cal-next">›</button></div><div class="calendar-week">${['S','S','R','K','J','S','M'].map(x=>`<span>${x}</span>`).join('')}</div><div class="calendar-grid">${cells.map(d=>{if(!d)return '<span></span>';const k=keyOf(d),l=activityLevel(ds.dayMap[k],ds,k);return `<button class="cal-day level-${l} ${k===todayKey()?'today':''}" data-date="${k}">${d.getDate()}</button>`}).join('')}</div><div class="calendar-legend"><span>○ belum</span><span>● sebagian</span><span>● aktif</span><span>● lengkap</span></div></div>`}
+  async function journalUI(ds){const current=ds.journal.find(x=>x.date===state.selectedDate);return `<div class="card pad"><div class="row between"><div><b>${fmt(fromKey(state.selectedDate),{day:'numeric',month:'long',year:'numeric'})}</b><p class="muted small">Catatan ini hanya tersimpan di perangkat/backup milikmu.</p></div></div><textarea id="journalText" rows="3" placeholder="Apa yang ingin dijaga atau diperbaiki besok?">${esc(current?.text||'')}</textarea><button class="primary-btn top-gap" data-action="save-journal">Simpan catatan</button></div>`}
+  function activityTimeline(ds){const rows=[];ds.murojaah.forEach(x=>rows.push({date:x.date,createdAt:x.createdAt,type:'🧠',title:`Murojaah ${murojaahTitle(x)}`,sub:qualityMeta(x.quality)[0]}));ds.days.forEach(d=>{const p=prayerCount(d);if(p)rows.push({date:d.date,createdAt:d.date+'T23:00:00',type:'✓',title:`${p}/5 shalat tercatat`,sub:d.fast?.active?`Puasa ${d.fast.type}`:''})});rows.sort((a,b)=>(b.createdAt||b.date).localeCompare(a.createdAt||a.date));if(!rows.length)return emptyState('◷','Belum ada aktivitas','Mulai mencatat dan riwayat akan muncul di sini.');return `<div class="card settings-list">${rows.slice(0,25).map(x=>`<div class="history-row"><div class="history-icon">${x.type}</div><div><b>${esc(x.title)}</b><small>${fmt(fromKey(x.date),{day:'numeric',month:'short'})}${x.sub?' · '+esc(x.sub):''}</small></div></div>`).join('')}</div>`}
+  function achievementUI(ds){const sessions=ds.murojaah.length,active=ds.days.filter(d=>hasDayActivity(d,ds,d.date)).length,tah=ds.days.filter(d=>(d.sunnah?.tahajud||0)>0).length,fluent=ds.murojaah.filter(x=>x.quality==='fluent').length;const a=[['🧠','25 sesi murojaah',sessions>=25],['✨','10 sesi lancar',fluent>=10],['🔥','30 hari aktif',active>=30],['🌙','Tahajud 10 kali',tah>=10]];return `<div class="achievement-grid">${a.map(([i,t,ok])=>`<div class="achievement ${ok?'unlocked':''}"><span>${i}</span><b>${t}</b><small>${ok?'Tercapai':'Belum tercapai'}</small></div>`).join('')}</div>`}
+  async function aktivitasPage(){const ds=await dataset(),days=lastDates(7),active=days.filter(d=>hasDayActivity(ds.dayMap[keyOf(d)],ds,keyOf(d))).length,prayers=sum(days,d=>prayerCount(ds.dayMap[keyOf(d)]||AtsarDB.emptyDay())),mur=sum(days,d=>murojaahSessionsFor(ds,keyOf(d))),murPages=sum(days,d=>murojaahPagesFor(ds,keyOf(d)));return `<section class="page-head"><h1>Aktivitas</h1><p>Riwayat, ringkasan pekan, kalender, dan refleksi pribadimu.</p></section><div class="card pad weekly-card"><div class="row between"><div><span class="eyebrow">7 HARI TERAKHIR</span><h2>Pekanmu di Atsar</h2></div><span class="streak-badge">🔥 ${streakFrom(ds)} hari</span></div><div class="stat-grid four"><div class="stat-box"><strong>${active}/7</strong><span>hari aktif</span></div><div class="stat-box"><strong>${prayers}</strong><span>shalat</span></div><div class="stat-box"><strong>${mur}</strong><span>sesi murojaah</span></div><div class="stat-box"><strong>${murPages}</strong><span>hlm murojaah</span></div></div><p class="insight-text">${weeklyInsight(ds)}</p></div>${sectionHead('Kalender ibadah')}${calendarUI(ds)}${sectionHead('Catatan refleksi')}${await journalUI(ds)}${sectionHead('Milestone pribadi')}${achievementUI(ds)}${sectionHead('Aktivitas terbaru')}${activityTimeline(ds)}`}
+
+  function profileRow(icon,title,sub,href){return `<a class="setting-row button-row setting-link" href="${href}"><span class="setting-icon">${icon}</span><span><b>${title}</b><small>${sub}</small></span><span>›</span></a>`}
+  async function profilPage(){const ds=await dataset(),due=dueMurojaah(ds);return `<section class="page-head"><h1>Profil & Pengaturan</h1></section><div class="card profile-head"><div class="avatar">${esc((state.settings.nickname||'A')[0].toUpperCase())}</div><div><span class="muted">Nama panggilan</span><h2>${esc(state.settings.nickname)}</h2><p>${esc(state.settings.appName)} · ${esc(state.settings.tagline)}</p></div></div><div class="profile-sections"><div><span class="eyebrow">PERJALANAN</span><div class="card settings-list">${profileRow('▥','Statistik ibadah','Tren 7/30/90 hari & breakdown','statistik.html')}${profileRow('🔥','Target & Streak',`Streak saat ini ${streakFrom(ds)} hari`,'target-streak.html')}${profileRow('▦','Kalender Ibadah','Lihat pola aktivitas bulanan','kalender.html')}</div></div><div><span class="eyebrow">MUROJAAH & PUASA</span><div class="card settings-list">${profileRow('🧠','Murojaah',`${ds.murojaah.length} sesi · ${due.length} perlu diulang`,'murojaah.html')}${profileRow('☾','Qadha Puasa','Kelola utang dan pelunasan qadha','qadha.html')}</div></div><div><span class="eyebrow">PERSONAL</span><div class="card settings-list">${profileRow('▤','Kumpulan Doa','Arab, transliterasi Indonesia, arti','doa.html')}${profileRow('＋','Ibadah Custom','Buat tracker sendiri','ibadah-custom.html')}</div></div><div><span class="eyebrow">PENGATURAN</span><div class="card settings-list">${profileRow('⚙','Personalisasi','Nama, lokasi, target murojaah','personalisasi.html')}${profileRow('◷','Waktu Shalat','Edit waktu shalat manual','waktu-shalat.html')}${profileRow(state.settings.darkMode?'☾':'☀','Tampilan',state.settings.darkMode?'Mode gelap':'Mode terang','tampilan.html')}${profileRow('⇅','Data & Backup','Export, import, restore','backup.html')}</div></div></div>`}
+
+  function statsPage(ds){const range=state.statsRange||30,dates=lastDates(range),days=dates.map(d=>ds.dayMap[keyOf(d)]||AtsarDB.emptyDay()),active=dates.filter(d=>hasDayActivity(ds.dayMap[keyOf(d)],ds,keyOf(d))).length,totalPrayer=sum(days,prayerCount),jamaah=sum(days,d=>Object.values(d.prayers||{}).filter(p=>p.done&&(p.mode==='jamaah'||p.mode==='masjid')).length),masjid=sum(days,d=>Object.values(d.prayers||{}).filter(p=>p.done&&p.mode==='masjid').length),raw=sum(days,rawatibCount),dhuha=days.filter(d=>(d.sunnah?.dhuha||0)>0).length,tahajud=days.filter(d=>(d.sunnah?.tahajud||0)>0).length,witir=days.filter(d=>d.sunnah?.witir).length,fast=days.filter(d=>d.fast?.active).length,murSessions=sum(dates,d=>murojaahSessionsFor(ds,keyOf(d))),murAyat=sum(dates,d=>murojaahAyatFor(ds,keyOf(d))),murPages=sum(dates,d=>murojaahPagesFor(ds,keyOf(d))),periodM=ds.murojaah.filter(x=>dates.some(d=>keyOf(d)===x.date)),surahs=new Set(periodM.filter(x=>!(x.scope==='juz'||x.juz)&&x.surah).map(x=>x.surah)).size,juzs=new Set(periodM.filter(x=>x.scope==='juz'||x.juz).map(x=>Number(x.juz)).filter(Boolean)).size,prayers=['subuh','dzuhur','ashar','maghrib','isya'].map(id=>({id,label:state.settings.prayerLabels[id],done:days.filter(d=>d.prayers?.[id]?.done).length,jamaah:days.filter(d=>d.prayers?.[id]?.done&&['jamaah','masjid'].includes(d.prayers[id].mode)).length,masjid:days.filter(d=>d.prayers?.[id]?.done&&d.prayers[id].mode==='masjid').length}));return `${backProfile()}<section class="page-head compact"><h1>Statistik Ibadah</h1><p>${range} hari terakhir · statistik dihitung langsung dari data Atsar di perangkatmu.</p></section><div class="range-pills">${[7,30,90].map(n=>`<button class="${range===n?'active':''}" data-action="stats-range" data-range="${n}">${n} Hari</button>`).join('')}</div><div class="stat-grid four"><div class="stat-box"><strong>${active}/${range}</strong><span>hari aktif</span></div><div class="stat-box"><strong>${totalPrayer}</strong><span>shalat tercatat</span></div><div class="stat-box"><strong>${murSessions}</strong><span>sesi murojaah</span></div><div class="stat-box"><strong>${murPages}</strong><span>hlm murojaah</span></div></div>${sectionHead(`Konsistensi ${range} hari`)}<div class="card pad"><div class="heatmap">${dates.map(d=>{const k=keyOf(d),l=activityLevel(ds.dayMap[k],ds,k);return `<span class="heat level-${l}" title="${k}"></span>`}).join('')}</div><div class="calendar-legend"><span>lebih sedikit</span><span class="heat level-1"></span><span class="heat level-2"></span><span class="heat level-3"></span><span>lebih aktif</span></div></div>${sectionHead(`Shalat ${range} hari`)}<div class="card pad"><div class="bar-list">${prayers.map(p=>`<div class="bar-row"><div><b>${p.label}</b><small>${p.done}/${range} · jamaah ${p.jamaah} · masjid ${p.masjid}</small></div><div class="bar-track"><i style="width:${pct(p.done,range)}%"></i></div><b>${pct(p.done,range)}%</b></div>`).join('')}</div></div>${sectionHead('Murojaah')}<div class="stat-grid four"><div class="stat-box"><strong>${murSessions}</strong><span>sesi</span></div><div class="stat-box"><strong>${murAyat}</strong><span>ayat tercatat</span></div><div class="stat-box"><strong>${surahs}</strong><span>surah disentuh</span></div><div class="stat-box"><strong>${juzs}</strong><span>juz disentuh</span></div></div>${sectionHead('Ringkasan lainnya')}<div class="stat-grid four"><div class="stat-box"><strong>${jamaah}</strong><span>shalat jamaah</span></div><div class="stat-box"><strong>${masjid}</strong><span>jamaah di masjid</span></div><div class="stat-box"><strong>${raw}</strong><span>rawatib</span></div><div class="stat-box"><strong>${dhuha}</strong><span>hari Dhuha</span></div><div class="stat-box"><strong>${tahajud}</strong><span>hari Tahajud</span></div><div class="stat-box"><strong>${witir}</strong><span>hari Witir</span></div><div class="stat-box"><strong>${fast}</strong><span>hari puasa</span></div><div class="stat-box"><strong>${dueMurojaah(ds).length}</strong><span>review jatuh tempo</span></div></div>`}
+
+  function targetToggle(name,label,on,extra=''){return `<label class="toggle-row"><span><b>${label}</b>${extra?`<small>${extra}</small>`:''}</span><input type="checkbox" name="${name}" ${on?'checked':''}><i></i></label>`}
+  function targetsPage(ds){const t=state.settings.targets||{};return `${backProfile()}<section class="page-head compact"><h1>Target & Streak</h1><p>Pilih sendiri apa yang dihitung sebagai target konsistensi harian.</p></section><div class="card pad"><form id="targetsForm" class="form-grid">${targetToggle('prayer5','Shalat wajib 5 waktu',t.prayer5)}${targetToggle('dzikirPagi','Dzikir pagi',t.dzikirPagi)}${targetToggle('dhuha','Dhuha',t.dhuha)}${targetToggle('murojaah','Murojaah harian',t.murojaah,`<input class="form-input mini-input" type="number" name="murojaahSessions" min="1" value="${t.murojaahSessions||1}"> sesi`)}<button class="primary-btn">Simpan target</button></form></div>${sectionHead('Streak saat ini')}<div class="stat-grid"><div class="stat-box"><strong>🔥 ${streakFrom(ds)}</strong><span>target utama</span></div><div class="stat-box"><strong>🧠 ${streakFrom(ds,'murojaah')}</strong><span>murojaah</span></div></div>`}
+  function qadhaPage(ds){const done=ds.days.filter(d=>d.fast?.active&&d.fast.type==='Qadha').length,left=Math.max(0,(state.settings.qadhaInitial||0)-done);return `${backProfile()}<section class="page-head compact"><h1>Qadha Puasa</h1></section><div class="card pad hero-progress"><span class="eyebrow">SISA QADHA</span><h2>${left} hari</h2><div class="progress-track"><div class="progress-fill" style="width:${pct(done,state.settings.qadhaInitial||1)}%"></div></div><p>${done} dari ${state.settings.qadhaInitial||0} hari selesai</p></div><div class="card pad"><form id="qadhaForm" class="form-grid"><label>Utang puasa awal<input class="form-input" type="number" min="0" name="initial" value="${state.settings.qadhaInitial||0}"></label><p class="muted small">Setiap hari yang kamu tandai sebagai Puasa → Qadha otomatis mengurangi sisa.</p><button class="primary-btn">Simpan</button></form></div>`}
+  function doaPage(){return `${backProfile()}<section class="page-head compact"><h1>Kumpulan Doa</h1><p>Transliterasi menggunakan gaya Indonesia.</p></section><div class="stack">${DOAS.map(d=>`<article class="card doa-card"><h3>${d.title}</h3><div class="arabic">${d.arab}</div><p class="latin">${d.latin}</p><p class="muted">${d.arti}</p></article>`).join('')}</div>`}
+  function customManager(){const hs=state.settings.customHabits||[];return `${backProfile()}<section class="page-head compact"><h1>Ibadah Custom</h1><p>Tambahkan tracker sesuai kebutuhanmu.</p></section><div class="card pad"><form id="customHabitForm" class="form-grid"><label>Nama<input class="form-input" name="name" required placeholder="Contoh: Al-Kahfi Jumat"></label><label>Jenis<select class="form-select" name="type"><option value="check">Checklist</option><option value="count">Jumlah</option></select></label><div class="two"><label>Unit<input class="form-input" name="unit" placeholder="kali / menit / halaman"></label><label>Target<input class="form-input" name="target" type="number" min="0"></label></div><button class="primary-btn">Tambah tracker</button></form></div>${sectionHead('Tracker aktif')}${hs.length?`<div class="card settings-list">${hs.map(h=>`<div class="setting-row simple"><div class="setting-icon">＋</div><div class="grow"><b>${esc(h.name)}</b><p>${h.type==='check'?'Checklist':'Jumlah'}${h.target?` · target ${h.target} ${esc(h.unit||'')}`:''}</p></div><button class="icon-btn danger-text" data-action="delete-custom" data-id="${h.id}">×</button></div>`).join('')}</div>`:emptyState('＋','Belum ada tracker','Tambahkan tracker pertamamu dari form di atas.')}`}
+  function personalization(){return `${backProfile()}<section class="page-head compact"><h1>Personalisasi</h1></section><div class="card pad"><form id="personalForm" class="form-grid"><label>Nama aplikasi<input class="form-input" name="appName" value="${esc(state.settings.appName)}"></label><label>Nama panggilan<input class="form-input" name="nickname" value="${esc(state.settings.nickname)}"></label><label>Tagline<input class="form-input" name="tagline" value="${esc(state.settings.tagline)}"></label><label>Lokasi<input class="form-input" name="location" value="${esc(state.settings.location)}"></label><label>Target murojaah / hari<input class="form-input" type="number" min="1" name="murojaahDailyTarget" value="${state.settings.murojaahDailyTarget||1}"></label><label>Warna utama<div class="color-row"><input class="form-input" name="accent" value="${esc(state.settings.accent)}"><input type="color" name="accentPicker" value="${esc(state.settings.accent)}"></div></label><button class="primary-btn">Simpan personalisasi</button></form></div>`}
+  function prayerSettings(){return `${backProfile()}<section class="page-head compact"><h1>Waktu Shalat</h1><p>Versi GitHub memakai waktu manual yang bebas diedit.</p></section><div class="card pad"><form id="prayerForm" class="form-grid">${Object.keys(state.settings.prayerTimes).map(id=>`<label>${state.settings.prayerLabels[id]}<input class="form-input" type="time" name="${id}" value="${state.settings.prayerTimes[id]}"></label>`).join('')}<button class="primary-btn">Simpan waktu shalat</button></form></div>`}
+  function displaySettings(){return `${backProfile()}<section class="page-head compact"><h1>Tampilan</h1></section><div class="card pad"><label class="toggle-row"><span><b>Mode gelap</b><small>Tersimpan di perangkat ini</small></span><input id="darkToggle" type="checkbox" ${state.settings.darkMode?'checked':''}><i></i></label></div>`}
+  async function backupPage(ds){return `${backProfile()}<section class="page-head compact"><h1>Data & Backup</h1><p>Data utama berada di IndexedDB perangkat ini. GitHub hanya menyimpan kode.</p></section><div class="card pad"><div class="backup-summary"><div><b>${ds.days.length}</b><span>hari</span></div><div><b>${ds.murojaah.length}</b><span>murojaah</span></div><div><b>${ds.journal.length}</b><span>jurnal</span></div><div><b>${state.settings.customHabits?.length||0}</b><span>tracker custom</span></div></div><div class="button-stack"><button class="primary-btn" data-action="export-backup">Buat Backup JSON</button><button class="ghost-btn" data-action="import-backup">Pulihkan dari Backup</button><button class="ghost-btn" data-action="share-backup">Bagikan Backup</button></div></div><div class="card pad"><span class="eyebrow">GOOGLE DRIVE</span><h2>Backup manual siap dipakai</h2><p class="muted">Simpan file JSON hasil backup ke Google Drive. Integrasi otomatis membutuhkan Google OAuth Client ID untuk domain GitHub Pages milikmu.</p></div><button class="danger-outline full" data-action="reset-all">Hapus semua data Atsar</button>`}
+
+  async function pageHTML(){const ds=await dataset();switch(PAGE){case'home':return homePage();case'ibadah':return ibadahPage();case'murojaah':return murojaahPage();case'aktivitas':return aktivitasPage();case'profil':return profilPage();case'statistik':return statsPage(ds);case'targets':return targetsPage(ds);case'kalender':return `${backProfile()}<section class="page-head compact"><h1>Kalender Ibadah</h1><p>Klik tanggal untuk melihat dan mengedit catatan harian melalui menu Ibadah.</p></section>${calendarUI(ds)}`;case'qadha':return qadhaPage(ds);case'doa':return doaPage();case'custom':return customManager();case'personal':return personalization();case'prayer':return prayerSettings();case'display':return displaySettings();case'backup':return backupPage(ds);default:return emptyState('!','Halaman tidak ditemukan','Kembali ke Home.',`<a href="index.html" class="primary-btn link-btn">Home</a>`)}}
+  async function render(){applyTheme();view.innerHTML='<div class="loading">Memuat Atsar…</div>';try{view.innerHTML=await pageHTML()}catch(err){console.error(err);view.innerHTML=`<div class="card pad"><h2>Halaman gagal dimuat</h2><p class="muted">${esc(err.message||String(err))}</p><a class="ghost-btn link-btn" href="index.html">Kembali ke Home</a></div>`}}
+  async function mutateDay(fn){const day=await dayData();fn(day);await AtsarDB.saveDay(day);await render()}
+  function saveSettings(msg){AtsarDB.saveSettings(state.settings);applyTheme();showToast(msg);render()}
+
+  document.addEventListener('click',async e=>{
+    if(e.target.closest('[data-stop]'))e.stopPropagation();
+    const dt=e.target.closest('[data-date]');if(dt){state.selectedDate=dt.dataset.date;if(PAGE==='kalender'){location.href=`ibadah.html?date=${encodeURIComponent(state.selectedDate)}`;return}await render();return}
+    const it=e.target.closest('[data-ibadah-tab]');if(it){state.ibadahTab=it.dataset.ibadahTab;await render();return}
+    const a=e.target.closest('[data-action]');if(!a)return;const act=a.dataset.action;
+    if(act==='close-modal'){closeModal();return}
+    if(act==='render'){await render();return}
+    if(act==='stats-range'){state.statsRange=Number(a.dataset.range)||30;await render();return}
+    if(act==='scope'){
+      state.murojaahScope=a.dataset.scope==='juz'?'juz':'surah';
+      // Allow changing the type when editing; keep the existing record ID.
+      if(state.murojaahEditId!==null){
+        state.murojaahDraft={...state.murojaahDraft,scope:state.murojaahScope,surah:'',juz:null,startAyah:null,endAyah:null};
+      }else state.murojaahDraft=null;
+      await render();return;
+    }
+    if(act==='edit-murojaah'||act==='repeat-murojaah'){
+      const record=await AtsarDB.get('murojaah',Number(a.dataset.id));
+      if(!record){showToast('Catatan tidak ditemukan.');return}
+      state.murojaahEditId=act==='edit-murojaah'?record.id:null;
+      state.murojaahScope=record.scope==='juz'||record.juz?'juz':'surah';
+      state.murojaahDraft=act==='repeat-murojaah'?{...record,date:todayKey(),quality:'fair',note:''}:record;
+      await render();$('#catat-murojaah')?.scrollIntoView({behavior:'smooth',block:'start'});return;
+    }
+    if(act==='cancel-murojaah'){
+      state.murojaahEditId=null;state.murojaahDraft=null;await render();return;
+    }
+    if(act==='more-murojaah'){
+      state.murojaahHistoryLimit+=15;
+      const ds=await dataset();$('#m-history-results').innerHTML=murojaahHistory(ds);return;
+    }
+    if(act==='toggle-due'){
+      state.murojaahShowAllDue=!state.murojaahShowAllDue;
+      await render();return;
+    }
+    if(act==='toggle-prayer'){await mutateDay(d=>d.prayers[a.dataset.prayer].done=!d.prayers[a.dataset.prayer].done);return}
+    if(act==='prayer-mode'){await mutateDay(d=>d.prayers[a.dataset.prayer].mode=a.dataset.mode);return}
+    if(act==='rawatib'){await mutateDay(d=>d.prayers[a.dataset.prayer][a.dataset.slot]=!d.prayers[a.dataset.prayer][a.dataset.slot]);return}
+    if(act==='sunnah-inc'||act==='sunnah-dec'){await mutateDay(d=>d.sunnah[a.dataset.id]=Math.max(0,Number(d.sunnah[a.dataset.id]||0)+(act==='sunnah-inc'?2:-2)));return}
+    if(act==='sunnah-toggle'){await mutateDay(d=>d.sunnah[a.dataset.id]=!d.sunnah[a.dataset.id]);return}
+    if(act==='fast-toggle'){await mutateDay(d=>d.fast.active=!d.fast.active);return}
+    if(act==='fast-type'){await mutateDay(d=>{d.fast.active=true;d.fast.type=a.dataset.fast});return}
+    if(act==='dzikir-add'){await mutateDay(d=>d.dzikir[a.dataset.kind]=Number(d.dzikir[a.dataset.kind]||0)+Number(a.dataset.num));return}
+    if(act==='dzikir-reset'){await mutateDay(d=>d.dzikir[a.dataset.kind]=0);return}
+    if(act==='custom-check'){await mutateDay(d=>{d.custom=d.custom||{};d.custom[a.dataset.id]=d.custom[a.dataset.id]?0:1});return}
+    if(act==='custom-inc'||act==='custom-dec'){await mutateDay(d=>{d.custom=d.custom||{};d.custom[a.dataset.id]=Math.max(0,Number(d.custom[a.dataset.id]||0)+(act==='custom-inc'?1:-1))});return}
+    if(act==='delete-murojaah'){if(confirm('Hapus catatan murojaah ini?')){await AtsarDB.del('murojaah',Number(a.dataset.id));showToast('Catatan dihapus.');await render()}return}
+    if(act==='cal-prev'){state.calendarCursor=new Date(state.calendarCursor.getFullYear(),state.calendarCursor.getMonth()-1,1);await render();return}
+    if(act==='cal-next'){state.calendarCursor=new Date(state.calendarCursor.getFullYear(),state.calendarCursor.getMonth()+1,1);await render();return}
+    if(act==='save-journal'){await AtsarDB.put('journal',{date:state.selectedDate,text:$('#journalText').value,updatedAt:new Date().toISOString()});showToast('Catatan tersimpan.');return}
+    if(act==='delete-custom'){state.settings.customHabits=(state.settings.customHabits||[]).filter(h=>h.id!==a.dataset.id);saveSettings('Tracker dihapus.');return}
+    if(act==='export-backup'){await exportBackup(false);return}
+    if(act==='share-backup'){await exportBackup(true);return}
+    if(act==='import-backup'){importFile.click();return}
+    if(act==='reset-all'){if(confirm('Hapus SEMUA data Atsar di perangkat ini? Backup dulu jika perlu.')){await AtsarDB.clearAll();localStorage.removeItem('atsar.settings.v2');state.settings=AtsarDB.settings();showToast('Semua data dihapus.');await render()}return}
+    if(act==='restore-merge'||act==='restore-replace'){try{await AtsarDB.importAll(state.backupPayload,act==='restore-merge'?'merge':'replace');state.settings=AtsarDB.settings();closeModal();showToast('Backup berhasil dipulihkan.');await render()}catch(err){showToast(err.message)}return}
+  });
+
+  function updateMurojaahSchedule(){
+    const form=$('#murojaahForm');if(!form)return;
+    const date=form.elements.date?.value,quality=form.querySelector('input[name="quality"]:checked')?.value;
+    const element=$('#m-next-review strong');
+    if(!date||!quality||!element||keyOf(fromKey(date))!==date)return;
+    element.textContent=fmt(fromKey(murojaahNextReview(date,quality)),{day:'numeric',month:'long',year:'numeric'});
+  }
+  document.addEventListener('change',async e=>{
+    if(e.target.closest('#murojaahForm')&&(e.target.name==='quality'||e.target.name==='date'))updateMurojaahSchedule();
+    if(e.target.id==='m-history-filter'){
+      state.murojaahHistoryFilter=e.target.value;
+      state.murojaahHistoryLimit=15;
+      $('#m-history-results').innerHTML=murojaahHistory(await dataset());
+    }
+  });
+  document.addEventListener('input',async e=>{
+    if(e.target.id==='m-history-search'){
+      state.murojaahHistoryQuery=e.target.value;
+      state.murojaahHistoryLimit=15;
+      $('#m-history-results').innerHTML=murojaahHistory(await dataset());
+    }
+  });
+
+  document.addEventListener('submit',async e=>{
+    e.preventDefault();const f=e.target,d=formObj(f);
+    if(f.id==='murojaahForm'){
+      const scope=d.scope==='juz'?'juz':'surah',date=d.date;
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(fromKey(date).getTime())||keyOf(fromKey(date))!==date||date>todayKey()){
+        showToast('Pilih tanggal yang valid, tidak melebihi hari ini.');return;
+      }
+      if(scope==='surah'&&!window.ATSAR_SURAHS.includes(d.surah)){
+        showToast('Silakan pilih nama surah.');return;
+      }
+      if(scope==='juz'&&(!/^\d+$/.test(d.juz)||Number(d.juz)<1||Number(d.juz)>30)){
+        showToast('Pilih juz 1–30.');return;
+      }
+      const startAyah=d.startAyah?Number(d.startAyah):null,endAyah=d.endAyah?Number(d.endAyah):null;
+      const startPage=d.startPage?Number(d.startPage):null,endPage=d.endPage?Number(d.endPage):null;
+      if(scope==='surah'&&(Boolean(startAyah)!==Boolean(endAyah)|| (startAyah&&(!Number.isInteger(startAyah)||!Number.isInteger(endAyah)||startAyah<1||endAyah<startAyah)))){
+        showToast('Isi ayat awal dan akhir secara berurutan.');return;
+      }
+      if(Boolean(startPage)!==Boolean(endPage)|| (startPage&&(!Number.isInteger(startPage)||!Number.isInteger(endPage)||startPage<1||endPage>604||endPage<startPage))){
+        showToast('Isi halaman awal dan akhir antara 1–604.');return;
+      }
+      if(!['weak','fair','good','fluent'].includes(d.quality)){
+        showToast('Pilih kualitas hafalan.');return;
+      }
+      const existing=state.murojaahEditId===null?null:await AtsarDB.get('murojaah',state.murojaahEditId);
+      if(state.murojaahEditId!==null&&!existing){showToast('Catatan tidak ditemukan.');return}
+      const next=murojaahNextReview(date,d.quality);
+      const record={...(existing||{}),date,scope,surah:scope==='surah'?d.surah:'',juz:scope==='juz'?Number(d.juz):null,
+        startAyah:scope==='surah'?startAyah:null,endAyah:scope==='surah'?endAyah:null,
+        startPage,endPage,pages:startPage&&endPage?endPage-startPage+1:0,quality:d.quality,
+        nextReview:next,note:String(d.note||'').trim().slice(0,1000),
+        createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+      const button=f.querySelector('[type="submit"]');button.disabled=true;
+      try{
+        if(existing)await AtsarDB.put('murojaah',record);
+        else await AtsarDB.add('murojaah',record);
+        state.murojaahEditId=null;state.murojaahDraft=null;
+        showToast(existing?'Catatan murojaah diperbarui.':'Catatan murojaah tersimpan.');
+        await render();
+      }catch(err){console.error(err);showToast('Gagal menyimpan. Coba lagi.');button.disabled=false}
+      return;
+    }
+    if(f.id==='targetsForm'){state.settings.targets={prayer5:f.prayer5.checked,dzikirPagi:f.dzikirPagi.checked,dhuha:f.dhuha.checked,murojaah:f.murojaah.checked,murojaahSessions:Number(d.murojaahSessions||1)};saveSettings('Target tersimpan.');return}
+    if(f.id==='qadhaForm'){state.settings.qadhaInitial=Number(d.initial||0);saveSettings('Qadha diperbarui.');return}
+    if(f.id==='customHabitForm'){const id='h'+Date.now();state.settings.customHabits=state.settings.customHabits||[];state.settings.customHabits.push({id,name:d.name,type:d.type,unit:d.unit||'',target:Number(d.target||0)});saveSettings('Tracker ditambahkan.');return}
+    if(f.id==='personalForm'){state.settings.appName=d.appName||'Atsar';state.settings.nickname=d.nickname||'Ibe';state.settings.tagline=d.tagline||'';state.settings.location=d.location||'';state.settings.murojaahDailyTarget=Number(d.murojaahDailyTarget||1);state.settings.accent=d.accent||'#195d63';saveSettings('Personalisasi tersimpan.');return}
+    if(f.id==='prayerForm'){Object.keys(state.settings.prayerTimes).forEach(id=>state.settings.prayerTimes[id]=d[id]);saveSettings('Waktu shalat tersimpan.');return}
+  });
+
+  document.addEventListener('change',e=>{if(e.target.id==='darkToggle'){state.settings.darkMode=e.target.checked;saveSettings('Tampilan diperbarui.');return}if(e.target.name==='accentPicker'){const text=$('[name="accent"]');if(text)text.value=e.target.value}});
+
+  async function exportBackup(share){const payload=await AtsarDB.exportAll(),json=JSON.stringify(payload,null,2),name=`atsar-backup-${todayKey()}.json`,blob=new Blob([json],{type:'application/json'}),file=new File([blob],name,{type:'application/json'});if(share&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({title:'Backup Atsar',files:[file]});return}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);showToast(share?'Perangkat tidak mendukung share file; backup diunduh.':'Backup JSON dibuat.')}
+  importFile.addEventListener('change',async()=>{const file=importFile.files[0];if(!file)return;try{const p=JSON.parse(await file.text());state.backupPayload=p;const stores=p.stores||{},days=p.version===1?Object.keys(p.days||{}).length:(stores.days||[]).length,mur=(stores.murojaah||[]).length;openModal(`<span class="eyebrow">PREVIEW BACKUP</span><h2>${esc(file.name)}</h2><p class="muted">${p.exportedAt?fmt(new Date(p.exportedAt),{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}):'Tanggal tidak tersedia'}</p><div class="backup-summary three"><div><b>${days}</b><span>hari</span></div><div><b>${mur}</b><span>murojaah</span></div><div><b>${(stores.journal||[]).length}</b><span>jurnal</span></div></div><div class="notice"><b>Gabungkan</b> mempertahankan data perangkat. <b>Ganti seluruh data</b> membuat Atsar sama seperti backup.</div><div class="button-stack"><button class="primary-btn" data-action="restore-merge">Gabungkan data</button><button class="danger-outline" data-action="restore-replace">Ganti seluruh data</button><button class="ghost-btn" data-action="close-modal">Batal</button></div>`)}catch(err){showToast('File backup tidak valid.')}finally{importFile.value=''}});
+
+  if(installBtn){let deferredInstall=null;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstall=e;installBtn.hidden=false});installBtn.addEventListener('click',async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;installBtn.hidden=true})}
+  if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js'));
+
+  (async()=>{await AtsarDB.openDB();await AtsarDB.migrateV1();state.settings=AtsarDB.settings();const qp=new URLSearchParams(location.search);if(qp.get('date'))state.selectedDate=qp.get('date');applyTheme();await render()})().catch(err=>{console.error(err);view.innerHTML=`<div class="card pad"><h2>Atsar gagal dimuat</h2><p>${esc(err.message)}</p></div>`});
+})();
